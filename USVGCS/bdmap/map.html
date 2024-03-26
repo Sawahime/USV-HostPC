@@ -1,0 +1,435 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Hello, World</title>
+    <style type="text/css">
+        html {
+            height: 100%
+        }
+
+        body {
+            height: 100%;
+            margin: 0px;
+            padding: 0px
+        }
+
+        #container {
+            height: 100%
+        }
+		.anchorBL{display:none}
+    </style>
+    <script type="text/javascript" src="http://api.map.baidu.com/getscript?v=3.0&ak=jAGYII0SilHGQue6XffDAR3R1TcuDytE">
+        //v3.0版本的引用方式：src="http://api.map.baidu.com/api?v=3.0&ak=您的密钥"
+    </script>
+    <script type="text/javascript" src="library_DistanceTool_1.2_src_DistanceTool_min.js"></script>
+    <script type="text/javascript" src="library_DrawingManager_1.4_src_DrawingManager_min.js"></script>
+    <link rel="stylesheet" href="library_DrawingManager_1.4_src_DrawingManager_min.css" />
+    <script type="text/javascript" src="qwebchannel.js"></script>
+</head>
+<body>
+    <div id="container"></div> 
+    <!--
+    <div id="result">
+
+        <input type="button" value="获取绘制覆盖物个数" onclick="alert(taskOverlays.length)"/>
+        <input type="button" value="获取覆盖物信息" onclick="getLayerInformation()">
+        <input type="button" value="绘制多边形" onclick="drawPolygon()">
+        <input type="button" value="清除所有覆盖物" onclick="clearAll()"/>
+        
+        <label for="">经度：</label> <input type="text" id="ILng">
+        <label for="">纬度：</label> <input type="text" id="ILat">
+
+        <input type="button" value="判断点是否在多边形内" onclick="IsInPolygon()">
+        
+    </div>
+    -->
+</body>
+</html>
+<script src="http://libs.baidu.com/jquery/2.1.4/jquery.min.js"></script>
+<script type="text/javascript" src="GeoUtils.js"></script>
+<script type="text/javascript">
+    var map = new BMap.Map("container");  // 创建地图实例
+    map.centerAndZoom(new BMap.Point(113.62, 22.37), 15);  // 初始化地图，设置中心点坐标和地图级别
+    map.enableScrollWheelZoom(); //开启滚轮缩放
+    map.disableDoubleClickZoom();	
+    map.addControl(new BMap.NavigationControl({ type: BMAP_NAVIGATION_CONTROL_LARGE, showZoomInfo: true }));
+    map.addControl(new BMap.MapTypeControl({ mapTypes: [BMAP_NORMAL_MAP, BMAP_HYBRID_MAP], anchor: BMAP_ANCHOR_TOP_LEFT, offset: new BMap.Size(80, 50)}));
+    map.addControl(new BMap.ScaleControl({ anchor: BMAP_ANCHOR_TOP_LEFT }));    
+
+    var boatMarker = new BMap.Marker;  //船的marker
+    var testMarker = new BMap.Marker;   //测试点的marker
+    var boatIcon = new BMap.Symbol(BMap_Symbol_SHAPE_FORWARD_CLOSED_ARROW, { //BMap_Symbol_SHAPE_PLANE
+        scale: 1.5,
+        strokeWeight: 1,
+        fillColor: "red",
+        fillOpacity: 0.8
+    });
+    var boatPoints = new Array();  //保存船舶的轨迹点
+    var boatTrackPolyline = new BMap.Polyline([], { strokeColor: "red", strokeWeight: 2, strokeOpacity: 0.5 });
+    var ballMarkers = new Array();
+    var ballColors = new Array();
+    var taskOverlays = new Array();
+
+    var styleOptions = {
+        strokeColor: "red",    //边线颜色。
+        fillColor: "red",      //填充颜色。当参数为空时，圆形将没有填充效果。
+        strokeWeight: 3,       //边线的宽度，以像素为单位。
+        strokeOpacity: 0.8,	   //边线透明度，取值范围0 - 1。
+        fillOpacity: 0.6,      //填充的透明度，取值范围0 - 1。
+        strokeStyle: 'solid' //边线的样式，solid或dashed。
+    }
+    //实例化鼠标绘制工具
+    var drawingManager = new BMapLib.DrawingManager(map, {
+        isOpen: false, //是否开启绘制模式
+        enableDrawingTool: true, //是否显示工具栏
+        enableCalculate: true,
+        drawingToolOptions: {
+            anchor: BMAP_ANCHOR_TOP_RIGHT, //位置
+            offset: new BMap.Size(5, 5), //偏离值
+        },
+        circleOptions: styleOptions, //圆的样式
+        polylineOptions: styleOptions, //线的样式
+        polygonOptions: styleOptions, //多边形的样式
+        rectangleOptions: styleOptions //矩形的样式
+    });     
+
+    function overlay_style(e) {
+        var p = e.target;
+        if (p instanceof BMap.Marker) {
+            alert("该覆盖物是点，点的坐标是：" + p.getPosition().lng + "," + p.getPosition().lat);
+        } else if (p instanceof BMap.Circle) {
+            alert("该覆盖物是圆，圆的半径是：" + p.getRadius() + "，圆的中心点坐标是：" + p.getCenter().lng + "," + p.getCenter().lat);
+        } else if (p instanceof BMap.Polyline) {
+            alert("该覆盖物是折线，所画点的个数是：" + p.getPath().length);
+        } else {
+            alert("无法获知该覆盖物类型");
+        }
+    }
+
+    function taskOverlaysComplete(e) {
+        var len = taskOverlays.push(e.overlay);
+        taskOverlays[len-1].addEventListener("click", overlay_style);
+    }
+    drawingManager.addEventListener("overlaycomplete", taskOverlaysComplete);
+    
+
+    function showBoatPosition(lng, lat, course, whtherDrawTrack) {
+        var currentPosition = wgs84tobd09(lng, lat);
+        var currentPoint = new BMap.Point(currentPosition[0], currentPosition[1]);
+        boatIcon.setRotation(course);
+        boatMarker.setIcon(boatIcon);
+        boatMarker.setPosition(currentPoint);
+        map.addOverlay(boatMarker);
+
+
+        if (whtherDrawTrack) {            
+            boatPoints.push(currentPoint);
+            if (boatPoints.length > 1) {
+                boatTrackPolyline.setPath(boatPoints);
+                map.addOverlay(boatTrackPolyline);                
+            }                            
+        } else {
+            boatPoints = [];
+            map.removeOverlay(realtime_polyline);
+        }
+    }
+
+    function clear() {        
+        map.clearOverlays();
+        boatPoints = [];
+    }
+
+    function showOverlays() {
+        var overlaysArray = map.getOverlays(); 
+        alert(overlaysArray.length);
+        for (var i = 0; i < overlaysArray.length; i++) {
+            if (overlaysArray[i] instanceof BMap.Marker) {
+                alert(i + "," + overlaysArray[i].getPosition().lng + "," + overlaysArray[i].getPosition().lat);
+            }            
+        }
+    }
+    
+    map.addEventListener("click", function (e)
+    {
+        //var wgsBallPoint = bd09towgs84(e.point.lng, e.point.lat)
+        //addBall(wgsBallPoint[0], wgsBallPoint[1],"red");
+    });
+
+    //添加球，参数wgs84_lng,wgs84_lat,ball'color,由qt调用.colorIndex: 0(red); 1(blue); 2(yellow);3(green); 4(black)
+    function addBall(lng, lat, colorIndex) {
+        var newBall = wgs84tobd09(lng, lat);
+        var color;
+        switch (colorIndex) {
+            case 0: color = "red"; break;
+            case 1: color = "blue"; break;
+            case 2: color = "yellow"; break;
+            case 3: color = "green"; break;
+            case 4: color = "black"; break;
+            default: break;
+        }
+        var len=ballMarkers.push( new BMap.Marker(new BMap.Point(newBall[0], newBall[1]), {
+            icon: new BMap.Symbol(BMap_Symbol_SHAPE_CIRCLE, {
+                scale: 5,//图标缩放大小
+                strokeWeight: 0.1,
+                fillColor: color,//填充颜色
+                fillOpacity: 0.6//填充透明度                
+            }),
+            title: ballMarkers.length+','+ lng.toString() + ',' + lat.toString()
+        }));
+        map.addOverlay(ballMarkers[len - 1]);
+        ballColors.push(colorIndex);
+    }
+
+    //清理球
+    function clearBalls() {
+        for (var i = 0; i < ballMarkers.length; i++) {
+            map.removeOverlay(ballMarkers[i]);
+        }
+        ballMarkers = [];
+        ballColors = [];
+    }
+
+    //传递球
+    function transBalls() {
+        var len = ballMarkers.length;
+        for (var i = 0; i < len; i++) {
+            var wgsBall = bd09towgs84(ballMarkers[i].getPosition().lng, ballMarkers[i].getPosition().lat);
+            window.bridge.getBalls(i, wgsBall[0], wgsBall[1], ballColors[i]);
+        }        
+    }
+	
+	new QWebChannel(qt.webChannelTransport,
+    function(channel){
+        window.bridge=channel.objects.passId;//注册一个通道,将桥梁连接到qt下的passId，形成通路
+    });
+	
+    function transInfo(e) {
+        var wgsPoint = bd09towgs84(e.point.lng, e.point.lat);
+        window.bridge.getMousePoint(wgsPoint[0], wgsPoint[1]);//getMousePoint()为qt里公有槽函数
+    }
+    map.addEventListener("mousemove", transInfo);
+
+    //打开测量工具
+    var myDis = new BMapLib.DistanceTool(map);
+    function ruler() {
+        myDis.open();
+    }
+
+    function openDrawTool() {
+        drawingManager.setDrawingMode(BMAP_DRAWING_POLYLINE);
+        drawingManager.open();
+    }
+
+    var menu = new BMap.ContextMenu();
+    var txtMenuItem = [
+        {
+            text: '加载球',
+            callback: transBalls
+        },
+        {
+            text: '清除球',
+            callback: clearBalls
+        },
+        {
+            text: '清空所有',
+            callback: clear
+        }
+    ];
+    for (var i = 0; i < txtMenuItem.length; i++) {
+        menu.addItem(new BMap.MenuItem(txtMenuItem[i].text, txtMenuItem[i].callback, 100));
+    }
+    map.addContextMenu(menu);
+
+
+    /*以下为wgs84和bd09坐标互转*/ 
+    var x_PI = 3.14159265358979324 * 3000.0 / 180.0;
+    var PI = 3.1415926535897932384626;
+    var a = 6378245.0;
+    var ee = 0.00669342162296594323;
+
+    function wgs84tobd09(lng, lat) {
+        var mid = wgs84togcj02(lng, lat);
+        mid = gcj02tobd09(mid[0], mid[1]);
+        return mid
+    }
+
+    function bd09towgs84(lng, lat) {
+        var mid = bd09togcj02(lng, lat);
+        mid = gcj02towgs84(mid[0], mid[1]);
+        return mid
+    }
+
+    function bd09togcj02(bd_lon, bd_lat) {
+        var PI = 3.1415926535897932384626;
+        var a = 6378245.0;
+        var ee = 0.00669342162296594323;
+
+        var x_pi = 3.14159265358979324 * 3000.0 / 180.0;
+        var x = bd_lon - 0.0065;
+        var y = bd_lat - 0.006;
+        var z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * x_pi);
+        var theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * x_pi);
+        var gg_lng = z * Math.cos(theta);
+        var gg_lat = z * Math.sin(theta);
+        return [gg_lng, gg_lat]
+    }
+
+
+    function gcj02towgs84(lng, lat) {
+
+        var PI = 3.1415926535897932384626;
+        var a = 6378245.0;
+        var ee = 0.00669342162296594323;
+
+        if (out_of_china(lng, lat)) {
+            return [lng, lat]
+        }
+        else {
+            var dlat = transformlat(lng - 105.0, lat - 35.0);
+            var dlng = transformlng(lng - 105.0, lat - 35.0);
+            var radlat = lat / 180.0 * PI;
+            var magic = Math.sin(radlat);
+            magic = 1 - ee * magic * magic;
+            var sqrtmagic = Math.sqrt(magic);
+            dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * PI);
+            dlng = (dlng * 180.0) / (a / sqrtmagic * Math.cos(radlat) * PI);
+            mglat = lat + dlat;
+            mglng = lng + dlng;
+            return [lng * 2 - mglng, lat * 2 - mglat]
+        }
+    }
+
+    function wgs84togcj02(lng, lat) {
+
+        var PI = 3.1415926535897932384626;
+        var a = 6378245.0;
+        var ee = 0.00669342162296594323;
+
+        if (out_of_china(lng, lat)) {
+            return [lng, lat]
+        }
+        else {
+            var dlat = transformlat(lng - 105.0, lat - 35.0);
+            var dlng = transformlng(lng - 105.0, lat - 35.0);
+            var radlat = lat / 180.0 * PI;
+            var magic = Math.sin(radlat);
+            magic = 1 - ee * magic * magic;
+            var sqrtmagic = Math.sqrt(magic);
+            dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * PI);
+            dlng = (dlng * 180.0) / (a / sqrtmagic * Math.cos(radlat) * PI);
+            var mglat = lat + dlat;
+            var mglng = lng + dlng;
+            return [mglng, mglat]
+        }
+    }
+
+    function gcj02tobd09(lng, lat) {
+        var x_PI = 3.14159265358979324 * 3000.0 / 180.0;
+
+
+        var z = Math.sqrt(lng * lng + lat * lat) + 0.00002 * Math.sin(lat * x_PI);
+        var theta = Math.atan2(lat, lng) + 0.000003 * Math.cos(lng * x_PI);
+        var bd_lng = z * Math.cos(theta) + 0.0065;
+        var bd_lat = z * Math.sin(theta) + 0.006;
+        return [bd_lng, bd_lat]
+    }
+
+
+
+    function transformlat(lng, lat) {
+
+        var PI = 3.1415926535897932384626;
+
+
+        var ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + 0.1 * lng * lat + 0.2 * Math.sqrt(Math.abs(lng));
+        ret += (20.0 * Math.sin(6.0 * lng * PI) + 20.0 * Math.sin(2.0 * lng * PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(lat * PI) + 40.0 * Math.sin(lat / 3.0 * PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(lat / 12.0 * PI) + 320 * Math.sin(lat * PI / 30.0)) * 2.0 / 3.0;
+        return ret
+    }
+
+
+
+    function transformlng(lng, lat) {
+
+        var PI = 3.1415926535897932384626;
+
+
+        var ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + 0.1 * lng * lat + 0.1 * Math.sqrt(Math.abs(lng));
+        ret += (20.0 * Math.sin(6.0 * lng * PI) + 20.0 * Math.sin(2.0 * lng * PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(lng * PI) + 40.0 * Math.sin(lng / 3.0 * PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(lng / 12.0 * PI) + 300.0 * Math.sin(lng / 30.0 * PI)) * 2.0 / 3.0;
+        return ret
+    }
+
+    function out_of_china(lng, lat) {
+        return (lng < 72.004 || lng > 137.8347) || ((lat < 0.8293 || lat > 55.8271) || false);
+    }
+
+
+    var coordinates;
+    var polygon;
+    var isReatch;
+
+    function getLayerInformation(){
+        //console.log(taskOverlays[0].getPath());
+        //console.log(taskOverlays[1].getPath());
+
+        coordinates = taskOverlays[0].getPath();
+        //console.log(coordinates);
+
+        let point = coordinates;
+        let polArry = [];
+        point.forEach(item => {
+            let p = new BMap.Point(item.lng,item.lat);
+            polArry.push(p);
+        });
+        polygon = new BMap.Polygon(polArry,styleOptions);
+    }
+
+    function drawPolygon(){
+        let point = coordinates;
+        let polArry = [];
+        point.forEach(item => {
+            let p = new BMap.Point(item.lng,item.lat);
+            polArry.push(p);
+        });
+        polygon = new BMap.Polygon(polArry,styleOptions);
+        map.addOverlay(polygon);
+        console.log("polygon="+polygon);
+    }
+
+    function IsInPolygon(usv_lng,usv_lat){
+        getLayerInformation();
+        // var usv_lng = 113.6097854;
+        // var usv_lat = 22.3796395;
+        var currentPosition = wgs84tobd09(usv_lng, usv_lat);
+        var currentPoint = new BMap.Point(currentPosition[0], currentPosition[1]);
+        testMarker.setPosition(currentPoint);
+        //map.addOverlay(testMarker);
+        //console.log("testMarker"+testMarker);
+        
+        if(BMapLib.GeoUtils.isPointInPolygon(currentPoint,polygon)){
+            //console.log("在区域内");
+            isReatch = 0;
+        }else{
+            //console.log("不在区域内");
+            isReatch = 1;
+        }
+        bridge.whetherOut(isReatch);
+    }
+
+    function getTime(){
+        var time = new Date();
+        var year = time.getFullYear();
+        var month = time.getMonth()+1;
+        var today = time.getDate();
+        var h = time.getHours();
+        var m = time.getMinutes();
+        var s = time.getSeconds();
+        bridge.getCsvName(year,month,today,h,m,s);
+    }
+</script>
+
